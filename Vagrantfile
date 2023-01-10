@@ -1,33 +1,74 @@
-# Описываем Виртуальные машины
+# -*- mode: ruby -*-
+# vim: set ft=ruby :
+
 MACHINES = {
-  # Указываем имя ВМ "kernel update"
-  :"kernel-update" => {
-              #Какой vm box будем использовать
-              :box_name => "centos/stream8",
-              #Указываем box_version
-              :box_version => "20210210.0",
-              #Указываем количество ядер ВМ
-              :cpus => 2,
-              #Указываем количество ОЗУ в мегабайтах
-              :memory => 1024,
-            }
+  :"otuslinux-raid" => {
+        :box_name => "centos/7",
+       # :ip_addr => '192.168.11.101',
+	:disks => {
+		:sata1 => {
+			:dfile => './sata1.vdi',
+			:size => 250,
+			:port => 1
+		},
+		:sata2 => {
+                        :dfile => './sata2.vdi',
+                        :size => 250, # Megabytes
+			:port => 2
+		},
+                :sata3 => {
+                        :dfile => './sata3.vdi',
+                        :size => 250,
+                        :port => 3
+                },
+                :sata4 => {
+                        :dfile => './sata4.vdi',
+                        :size => 250, # Megabytes
+                        :port => 4
+                }
+
+	}
+
+		
+  },
 }
 
 Vagrant.configure("2") do |config|
+
   MACHINES.each do |boxname, boxconfig|
-    # Отключаем проброс общей папки в ВМ
-    config.vm.synced_folder ".", "/vagrant", disabled: true
-    config.vm.network "public_network"
-    # Применяем конфигруацию ВМ
-    config.vm.define boxname do |box|
-      box.vm.box = boxconfig[:box_name]
-      box.vm.box_version = boxconfig[:box_version]
-      box.vm.host_name = boxname.to_s
-      box.vm.provider "virtualbox" do |v|
-        v.memory = boxconfig[:memory]
-        v.cpus = boxconfig[:cpus]
+
+      config.vm.define boxname do |box|
+
+          box.vm.box = boxconfig[:box_name]
+          box.vm.host_name = boxname.to_s
+
+          #box.vm.network "forwarded_port", guest: 3260, host: 3260+offset
+
+          #box.vm.network "private_network", ip: boxconfig[:ip_addr]
+
+          box.vm.provider :virtualbox do |vb|
+            	  vb.customize ["modifyvm", :id, "--memory", "1024"]
+                  needsController = false
+		  boxconfig[:disks].each do |dname, dconf|
+			  unless File.exist?(dconf[:dfile])
+				vb.customize ['createhd', '--filename', dconf[:dfile], '--variant', 'Fixed', '--size', dconf[:size]]
+                                needsController =  true
+                          end
+
+		  end
+                  if needsController == true
+                     vb.customize ["storagectl", :id, "--name", "SATA", "--add", "sata" ]
+                     boxconfig[:disks].each do |dname, dconf|
+                         vb.customize ['storageattach', :id,  '--storagectl', 'SATA', '--port', dconf[:port], '--device', 0, '--type', 'hdd', '--medium', dconf[:dfile]]
+                     end
+                  end
+          end
+ 	  box.vm.provision "shell", inline: <<-SHELL
+	      mkdir -p ~root/.ssh
+              cp ~vagrant/.ssh/auth* ~root/.ssh
+	      yum install -y mdadm smartmontools hdparm gdisk
+  	  SHELL
+
       end
-    end
   end
 end
-
